@@ -12,44 +12,47 @@ def delete_duplicates(spreadsheet):
     header = all_rows[0]
     data = all_rows[1:]
 
-    # Track by URL: {url: [(row_index, row)]}
     url_map = {}
-    # Track exact row duplicates: {tuple(row): [row_index]}
     row_map = {}
 
-    for i, row in enumerate(data, start=2):  # sheet rows start at 1, data starts at row 2
+    for i, row in enumerate(data, start=2):  # 1-based index; skip header
         url = row[0].strip()
-        status = row[3].strip() if len(row) > 3 else ""
+        status = row[3].strip().lower() if len(row) > 3 else ""
 
-        # Group by URL
-        url_map.setdefault(url, []).append((i, row))
+        # Group rows by URL
+        url_map.setdefault(url, []).append((i, row, status))
 
-        # Group by exact row content
+        # Track exact duplicates
         row_tuple = tuple(cell.strip() for cell in row)
         row_map.setdefault(row_tuple, []).append(i)
 
     rows_to_delete = set()
 
-    # Handle "Remediated" vs non-Remediated duplicates (by URL)
     for url, entries in url_map.items():
-        if len(entries) > 1:
-            has_remediated = any(r[1][3].strip().lower() == "remediated" for r in entries if len(r[1]) > 3)
-            if has_remediated:
-                for row_index, row in entries:
-                    if len(row) < 4 or row[3].strip().lower() != "remediated":
-                        rows_to_delete.add(row_index)
+        statuses = [status for _, _, status in entries]
 
-    # Handle exact duplicates
+        # Rule 1: Keep only "Remediated" rows if present
+        if "remediated" in statuses:
+            for row_index, _, status in entries:
+                if status != "remediated":
+                    rows_to_delete.add(row_index)
+
+        # Rule 3: If any "skip", delete "pending" rows
+        elif "skip" in statuses:
+            for row_index, _, status in entries:
+                if status == "pending":
+                    rows_to_delete.add(row_index)
+
+    # Rule 2: Exact row duplicates
     for row_vals, indices in row_map.items():
         if len(indices) > 1:
-            # Keep one, delete the rest
-            rows_to_delete.update(indices[1:])
+            rows_to_delete.update(indices[1:])  # Keep one, delete rest
 
     # Delete from bottom to top
     for row_index in sorted(rows_to_delete, reverse=True):
         sheet.delete_rows(row_index)
 
-    print(f"✅ Deleted {len(rows_to_delete)} duplicate rows.")
+    print(f"✅ Deleted {len(rows_to_delete)} duplicate/conflicting rows.")
 
 # Write data to sheet
 def write_to_sheet(spreedsheet, rows):
